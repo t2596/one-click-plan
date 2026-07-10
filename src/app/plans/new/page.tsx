@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { v4 as uuidv4 } from 'uuid';
 import { formatDate, formatTime } from '@/lib/db';
+import { generatePlan } from '@/lib/ai-service';
 import type { Plan, PlanItem, ScheduleEntry, ReviewCard, AIPlanItem } from '@/lib/types';
 import {
   Sparkles,
@@ -64,35 +65,87 @@ export default function NewPlanPage() {
     setGenerating(true);
     setError('');
 
-    // Simulate AI generation with a structured template-based approach
-    // In production, this would call the LLM API
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    try {
+      // 尝试调用 AI API 生成计划
+      const result = await generatePlan({
+        goal: goal.trim(),
+        availableHoursPerDay,
+        startDate,
+        endDate,
+        preferences: preferences.trim(),
+      });
 
-    // Generate a sample plan based on user input
-    const topics = goal.split(/[,，、\s]+/).filter(Boolean);
-    if (topics.length === 0) topics.push(goal);
+      const mapped = {
+        title: result.planTitle,
+        description: result.planDescription,
+        items: result.planItems,
+      };
+
+      setGeneratedPlan(mapped);
+      setPlanTitle(mapped.title);
+      setPlanDesc(mapped.description);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '生成失败';
+
+      // 如果是 API Key 未配置或其他 API 错误，使用本地模拟生成作为降级方案
+      if (message.includes('API Key') || message.includes('API 请求')) {
+        setError(`${message}，将使用本地模拟生成计划。`);
+
+        // 降级：本地模拟生成
+        const fallbackPlan = generateFallbackPlan(
+          goal.trim(),
+          availableHoursPerDay,
+          startDate,
+          endDate
+        );
+
+        // 延迟一下让用户看到提示
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        setGeneratedPlan(fallbackPlan);
+        setPlanTitle(fallbackPlan.title);
+        setPlanDesc(fallbackPlan.description);
+        setError('');
+      } else {
+        setError(message);
+      }
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  /**
+   * 本地模拟生成计划（AI API 不可用时的降级方案）
+   */
+  function generateFallbackPlan(
+    planGoal: string,
+    hoursPerDay: number,
+    start: string,
+    end: string
+  ) {
+    const topics = planGoal.split(/[,，、\s]+/).filter(Boolean);
+    if (topics.length === 0) topics.push(planGoal);
 
     const items: AIPlanItem[] = [];
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+    const startD = new Date(start);
+    const endD = new Date(end);
+    const totalDays = Math.max(1, Math.ceil((endD.getTime() - startD.getTime()) / (1000 * 60 * 60 * 24)));
 
-    let currentDate = new Date(start);
+    let currentDate = new Date(startD);
     let dayIndex = 0;
     const phases = ['入门基础', '核心概念', '进阶深入', '实践练习', '总结复习'];
 
-    while (currentDate <= end && dayIndex < totalDays) {
+    while (currentDate <= endD && dayIndex < totalDays) {
       const phaseIndex = Math.min(Math.floor(dayIndex / Math.max(1, Math.ceil(totalDays / phases.length))), phases.length - 1);
       const phase = phases[phaseIndex];
       const topic = topics[dayIndex % topics.length];
-
       const hour = 9 + Math.floor(Math.random() * 3);
 
       items.push({
         title: `[${phase}] ${topic} - 第${dayIndex + 1}天`,
-        description: `学习 ${topic} 的${phase}部分，预计需要 ${availableHoursPerDay * 60} 分钟`,
+        description: `学习 ${topic} 的${phase}部分，预计需要 ${hoursPerDay * 60} 分钟`,
         type: phaseIndex === 3 ? 'practice' : phaseIndex === 4 ? 'review' : 'study',
-        estimatedMinutes: availableHoursPerDay * 60,
+        estimatedMinutes: hoursPerDay * 60,
         suggestedDate: formatDate(currentDate),
         suggestedStartTime: `${String(hour).padStart(2, '0')}:00`,
         reviewEnabled: true,
@@ -102,16 +155,12 @@ export default function NewPlanPage() {
       dayIndex++;
     }
 
-    setGeneratedPlan({
-      title: `${goal} - 学习计划`,
-      description: `为期 ${totalDays} 天的系统学习计划，每天 ${availableHoursPerDay} 小时`,
+    return {
+      title: `${planGoal} - 学习计划`,
+      description: `为期 ${totalDays} 天的系统学习计划，每天 ${hoursPerDay} 小时`,
       items,
-    });
-
-    setPlanTitle(`${goal} - 学习计划`);
-    setPlanDesc(`为期 ${totalDays} 天的系统学习计划，每天 ${availableHoursPerDay} 小时`);
-    setGenerating(false);
-  };
+    };
+  }
 
   const handleSavePlan = async () => {
     if (!generatedPlan) return;
