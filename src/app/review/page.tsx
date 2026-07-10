@@ -39,7 +39,7 @@ export default function ReviewPage() {
     plans,
     loadDueReviews,
     loadUpcomingReviews,
-    loadPlanItems,
+    loadAllPlanItems,
     loadPlans,
     editReviewCard,
     addReviewCard,
@@ -55,15 +55,12 @@ export default function ReviewPage() {
         loadDueReviews(),
         loadUpcomingReviews(),
         loadPlans(),
+        loadAllPlanItems(),
       ]);
-      // Load plan items for all plans
-      for (const plan of usePlanStore.getState().plans) {
-        await loadPlanItems(plan.id);
-      }
       setLoading(false);
     }
     init();
-  }, [loadDueReviews, loadUpcomingReviews, loadPlanItems, loadPlans]);
+  }, [loadDueReviews, loadUpcomingReviews, loadAllPlanItems, loadPlans]);
 
   const handleRate = async (score: ReviewScore) => {
     if (currentReview >= dueReviews.length) return;

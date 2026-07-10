@@ -49,6 +49,7 @@ interface PlanStore {
   // PlanItems
   planItems: PlanItem[];
   loadPlanItems: (planId: string) => Promise<void>;
+  loadAllPlanItems: () => Promise<void>;
   addPlanItem: (item: PlanItem) => Promise<string>;
   editPlanItem: (id: string, updates: Partial<PlanItem>) => Promise<void>;
   removePlanItem: (id: string) => Promise<void>;
@@ -132,6 +133,16 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
   loadPlanItems: async (planId: string) => {
     const items = await getPlanItems(planId);
     set({ planItems: items });
+  },
+
+  loadAllPlanItems: async () => {
+    const plans = await getAllPlans();
+    const allItems: PlanItem[] = [];
+    for (const plan of plans) {
+      const items = await getPlanItems(plan.id);
+      allItems.push(...items);
+    }
+    set({ planItems: allItems });
   },
 
   addPlanItem: async (item: PlanItem) => {
