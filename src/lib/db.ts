@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { Plan, PlanItem, ScheduleEntry, ReviewCard, PlanOutput, AppSettings } from './types';
+import type { Plan, PlanItem, ScheduleEntry, ReviewCard, PlanOutput, AppSettings, KnowledgeEntry } from './types';
 
 class PlanDatabase extends Dexie {
   plans!: EntityTable<Plan, 'id'>;
@@ -7,6 +7,7 @@ class PlanDatabase extends Dexie {
   scheduleEntries!: EntityTable<ScheduleEntry, 'id'>;
   reviewCards!: EntityTable<ReviewCard, 'id'>;
   planOutputs!: EntityTable<PlanOutput, 'id'>;
+  knowledgeEntries!: EntityTable<KnowledgeEntry, 'id'>;
   settings!: EntityTable<AppSettings, 'id'>;
 
   constructor() {
@@ -24,6 +25,11 @@ class PlanDatabase extends Dexie {
     // v2: 给 planOutputs 添加 updatedAt 索引
     this.version(2).stores({
       planOutputs: 'id, planId, planItemId, createdAt, updatedAt',
+    });
+
+    // v3: 新增知识库表
+    this.version(3).stores({
+      knowledgeEntries: 'id, category, source, createdAt',
     });
   }
 }
@@ -215,6 +221,38 @@ export async function searchOutputs(query: string): Promise<PlanOutput[]> {
 // ========== Settings 操作 ==========
 
 const SETTINGS_KEY = 'default';
+
+// ========== KnowledgeEntry 操作 ==========
+
+export async function getAllKnowledgeEntries(): Promise<KnowledgeEntry[]> {
+  return db.knowledgeEntries.orderBy('createdAt').reverse().toArray();
+}
+
+export async function getKnowledgeEntryById(id: string): Promise<KnowledgeEntry | undefined> {
+  return db.knowledgeEntries.get(id);
+}
+
+export async function getKnowledgeBySource(sourceId: string): Promise<KnowledgeEntry | undefined> {
+  return db.knowledgeEntries.where('sourceId').equals(sourceId).first();
+}
+
+export async function createKnowledgeEntry(entry: KnowledgeEntry): Promise<string> {
+  return db.knowledgeEntries.add(entry);
+}
+
+export async function updateKnowledgeEntry(id: string, updates: Partial<KnowledgeEntry>): Promise<number> {
+  return db.knowledgeEntries.update(id, { ...updates, updatedAt: new Date() });
+}
+
+export async function deleteKnowledgeEntry(id: string): Promise<void> {
+  await db.knowledgeEntries.delete(id);
+}
+
+export async function getKnowledgeByCategory(category: string): Promise<KnowledgeEntry[]> {
+  return db.knowledgeEntries.where('category').equals(category).toArray();
+}
+
+// ========== Settings 操作 ==========
 
 export async function getSettings(): Promise<AppSettings> {
   const settings = await db.settings.get(SETTINGS_KEY);

@@ -1,5 +1,5 @@
-import { getSettings } from './db';
-import type { AIPlanItem, AIGenerateResponse } from './types';
+import { getSettings, getAllKnowledgeEntries } from './db';
+import type { AIPlanItem, AIGenerateResponse, AIFileAnalysisResponse, KnowledgeEntry } from './types';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -27,8 +27,12 @@ function getBaseUrl(provider: string, customUrl?: string): string {
   return PROVIDER_BASE_URLS[provider] || PROVIDER_BASE_URLS.openai;
 }
 
-function buildSystemPrompt(): string {
-  return `你是一个专业的学习计划设计师。你的任务是根据用户的学习目标，生成一份结构化、可执行的每日学习计划。
+function buildSystemPrompt(knowledgeContext?: string): string {
+  const knowledgeSection = knowledgeContext
+    ? `\n\n用户已掌握以下知识背景：\n${knowledgeContext}\n\n请在此基础上制定计划，避免重复已掌握的基础内容，可以直接从进阶内容开始。`
+    : '';
+
+  return `你是一个专业的学习计划设计师。你的任务是根据用户的学习目标，生成一份结构化、可执行的每日学习计划。${knowledgeSection}
 
 你必须严格按照以下 JSON 格式输出（不要输出任何其他内容，只输出 JSON）：
 
@@ -42,7 +46,6 @@ function buildSystemPrompt(): string {
       "type": "study",
       "estimatedMinutes": 60,
       "suggestedDate": "2026-01-01",
-      "suggestedStartTime": "09:00",
       "reviewEnabled": true
     }
   ]
@@ -53,10 +56,10 @@ function buildSystemPrompt(): string {
 2. type 必须是以下之一：study（学习）、practice（练习）、review（复习）、output（产出）、other（其他）
 3. 按阶段组织：入门基础 -> 核心概念 -> 进阶深入 -> 实践练习 -> 总结复习
 4. estimatedMinutes 应等于用户每天可用时间（分钟）
-5. suggestedStartTime 根据用户偏好设定（默认 09:00）
-6. reviewEnabled 通常设为 true，表示该内容需要后续复习
-7. 每天的任务要有明确、可执行的内容，不要笼统的描述
-8. 加入适当的休息日和弹性调整空间`;
+5. reviewEnabled 通常设为 true，表示该内容需要后续复习
+6. 每天的任务要有明确、可执行的内容，不要笼统的描述
+7. 加入适当的休息日和弹性调整空间
+8. 不要生成具体的学习时间（如几点到几点），只需给出每天的学习时长即可`;
 }
 
 function buildUserPrompt(
@@ -105,7 +108,6 @@ function parseAIResponse(content: string): AIGenerateResponse {
     type: validTypes.includes(String(item.type)) ? String(item.type) as AIPlanItem['type'] : 'study',
     estimatedMinutes: Math.max(10, Math.min(480, Number(item.estimatedMinutes) || 60)),
     suggestedDate: String(item.suggestedDate || ''),
-    suggestedStartTime: String(item.suggestedStartTime || '09:00'),
     reviewEnabled: item.reviewEnabled !== false,
   }));
 
@@ -114,6 +116,31 @@ function parseAIResponse(content: string): AIGenerateResponse {
     planDescription: String(parsed.planDescription || ''),
     planItems: items,
   };
+}
+
+export async function buildKnowledgeContext(): Promise<string> {
+  const entries = await getAllKnowledgeEntries();
+  if (entries.length === 0) return '';
+
+  // 按分类分组并截断
+  const byCategory: Record<string, string[]> = {};
+  for (const entry of entries) {
+    if (!byCategory[entry.category]) byCategory[entry.category] = [];
+    byCategory[entry.category].push(`- ${entry.title}（熟练度: ${entry.proficiency}/5）: ${entry.content.slice(0, 150)}`);
+  }
+
+  const parts: string[] = [];
+  let totalChars = 0;
+  const MAX_CHARS = 3000;
+
+  for (const [cat, items] of Object.entries(byCategory)) {
+    const section = `[${cat}]\n${items.join('\n')}`;
+    if (totalChars + section.length > MAX_CHARS) break;
+    parts.push(section);
+    totalChars += section.length;
+  }
+
+  return parts.join('\n\n');
 }
 
 /**
@@ -129,6 +156,7 @@ export async function generatePlan(params: {
   const { goal, availableHoursPerDay, startDate, endDate, preferences } = params;
 
   const settings = await getSettings();
+  const knowledgeContext = await buildKnowledgeContext();
 
   if (!settings.aiApiKey) {
     throw new Error(
@@ -140,7 +168,7 @@ export async function generatePlan(params: {
   const apiUrl = `${baseUrl}/chat/completions`;
 
   const messages: ChatMessage[] = [
-    { role: 'system', content: buildSystemPrompt() },
+    { role: 'system', content: buildSystemPrompt(knowledgeContext) },
     { role: 'user', content: buildUserPrompt(goal, availableHoursPerDay, startDate, endDate, preferences) },
   ];
 
@@ -189,4 +217,144 @@ export async function generatePlan(params: {
   }
 
   return parseAIResponse(content);
+}
+
+/**
+ * 通用 AI API 调用
+ */
+async function callAI(messages: ChatMessage[]): Promise<string> {
+  const settings = await getSettings();
+
+  if (!settings.aiApiKey) {
+    throw new Error('请先在设置中配置 AI API Key');
+  }
+
+  const baseUrl = getBaseUrl(settings.aiProvider, settings.aiBaseUrl);
+  const apiUrl = `${baseUrl}/chat/completions`;
+
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${settings.aiApiKey}`,
+    },
+    body: JSON.stringify({
+      model: settings.aiModel || 'gpt-4o',
+      messages,
+      temperature: 0.7,
+      max_tokens: 4096,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    let errorMsg = `API 请求失败 (${response.status})`;
+
+    if (response.status === 401) {
+      errorMsg = 'API Key 无效或已过期，请在设置中检查';
+    } else if (response.status === 429) {
+      errorMsg = 'API 请求频率过高或额度不足，请稍后重试';
+    } else if (response.status === 404) {
+      errorMsg = `模型 "${settings.aiModel}" 不存在，请检查模型名称`;
+    } else if (errorBody) {
+      try {
+        const err = JSON.parse(errorBody);
+        errorMsg = err.error?.message || errorMsg;
+      } catch {
+        errorMsg = `${errorMsg}: ${errorBody.slice(0, 200)}`;
+      }
+    }
+
+    throw new Error(errorMsg);
+  }
+
+  const data: ChatCompletionResponse = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('AI 未返回有效内容，请重试');
+  }
+
+  return content;
+}
+
+/**
+ * 基于现有计划进行迭代修改
+ */
+export async function refinePlan(params: {
+  goal: string;
+  planTitle: string;
+  currentItems: AIPlanItem[];
+  refineInstruction: string;
+}): Promise<AIGenerateResponse> {
+  const { goal, planTitle, currentItems, refineInstruction } = params;
+
+  const currentPlanJson = JSON.stringify(currentItems, null, 2);
+
+  const systemPrompt = `你是一个专业的学习计划设计师。用户已经有一个初步的学习计划，现在需要根据用户的反馈进行修改。
+
+当前计划标题：${planTitle}
+学习目标：${goal}
+
+当前计划内容：
+${currentPlanJson}
+
+用户的修改要求如下。请只修改用户提到的部分，其余保持不变。按原 JSON 格式输出完整的修改后计划。
+
+{
+  "planTitle": "${planTitle}",
+  "planDescription": "计划的简短描述",
+  "planItems": [...]
+}`;
+
+  const content = await callAI([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: `修改要求：${refineInstruction}\n\n请输出修改后的完整计划 JSON。` },
+  ]);
+
+  return parseAIResponse(content);
+}
+
+/**
+ * AI 分析上传的文件内容，提炼为知识条目
+ */
+export async function analyzeFileContent(
+  fileContent: string,
+  fileName: string
+): Promise<AIFileAnalysisResponse> {
+  const systemPrompt = `你是一个知识管理助手。用户上传了一个学习相关文件，请你分析其中的内容，提炼出知识要点。
+
+你必须输出以下 JSON 格式（只输出 JSON）：
+{
+  "title": "知识条目的标题（简明扼要）",
+  "content": "从文件中提炼出的知识摘要（200字以内）",
+  "category": "知识分类（如：编程语言、数学、英语、设计、其他）",
+  "proficiency": 3
+}
+
+规则：
+1. proficiency 为用户对该内容的熟练度估计，1=刚入门，5=精通（根据文件内容深度估算）
+2. category 根据内容自动判断最合适的分类
+3. content 要简洁但信息量大，突出核心知识点`;
+
+  const content = await callAI([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: `文件名：${fileName}\n文件内容：\n${fileContent.slice(0, 8000)}` },
+  ]);
+
+  // 解析 AI 返回
+  let jsonStr = content.trim();
+  const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    jsonStr = jsonMatch[1].trim();
+  }
+
+  const parsed = JSON.parse(jsonStr);
+
+  return {
+    title: String(parsed.title || `来自 ${fileName} 的知识`),
+    content: String(parsed.content || ''),
+    category: String(parsed.category || '其他'),
+    proficiency: Math.max(1, Math.min(5, Number(parsed.proficiency) || 3)),
+  };
 }

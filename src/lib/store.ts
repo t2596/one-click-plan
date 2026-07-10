@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Plan, PlanItem, ScheduleEntry, ReviewCard, PlanOutput } from '@/lib/types';
+import type { Plan, PlanItem, ScheduleEntry, ReviewCard, PlanOutput, KnowledgeEntry } from '@/lib/types';
 import {
   getAllPlans,
   getPlanById,
@@ -28,6 +28,11 @@ import {
   updateOutput,
   deleteOutput,
   searchOutputs,
+  getAllKnowledgeEntries,
+  createKnowledgeEntry,
+  updateKnowledgeEntry,
+  deleteKnowledgeEntry,
+  getKnowledgeByCategory,
   todayStr,
 } from '@/lib/db';
 
@@ -77,6 +82,13 @@ interface PlanStore {
   editOutput: (id: string, updates: Partial<PlanOutput>) => Promise<void>;
   removeOutput: (id: string) => Promise<void>;
   searchInOutputs: (query: string) => Promise<PlanOutput[]>;
+
+  // Knowledge
+  knowledgeEntries: KnowledgeEntry[];
+  loadKnowledgeEntries: () => Promise<void>;
+  addKnowledgeEntry: (entry: KnowledgeEntry) => Promise<string>;
+  editKnowledgeEntry: (id: string, updates: Partial<KnowledgeEntry>) => Promise<void>;
+  removeKnowledgeEntry: (id: string) => Promise<void>;
 }
 
 export const usePlanStore = create<PlanStore>((set, get) => ({
@@ -263,6 +275,30 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
 
   searchInOutputs: async (query: string) => {
     return searchOutputs(query);
+  },
+
+  // Knowledge
+  knowledgeEntries: [],
+
+  loadKnowledgeEntries: async () => {
+    const entries = await getAllKnowledgeEntries();
+    set({ knowledgeEntries: entries });
+  },
+
+  addKnowledgeEntry: async (entry: KnowledgeEntry) => {
+    const id = await createKnowledgeEntry(entry);
+    await get().loadKnowledgeEntries();
+    return id;
+  },
+
+  editKnowledgeEntry: async (id: string, updates: Partial<KnowledgeEntry>) => {
+    await updateKnowledgeEntry(id, updates);
+    await get().loadKnowledgeEntries();
+  },
+
+  removeKnowledgeEntry: async (id: string) => {
+    await deleteKnowledgeEntry(id);
+    await get().loadKnowledgeEntries();
   },
 }));
 

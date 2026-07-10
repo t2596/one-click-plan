@@ -117,6 +117,36 @@ export interface AIPlanItem {
   type: PlanItem['type'];
   estimatedMinutes: number;
   suggestedDate: string;
-  suggestedStartTime: string;
   reviewEnabled: boolean;
+}
+
+// ========== AI 相关模型 ==========
+
+export interface AIRefineRequest {
+  previousGoal: string;
+  previousPlanTitle: string;
+  currentItems: AIPlanItem[];
+  refineInstruction: string;
+}
+
+export interface AIFileAnalysisResponse {
+  title: string;
+  content: string;
+  category: string;
+  proficiency: number;
+}
+
+// ========== 知识库模型 ==========
+
+export interface KnowledgeEntry {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  proficiency: number; // 1-5
+  source: 'manual' | 'auto_plan' | 'imported_output' | 'ai_file_analysis';
+  sourceId: string | null;
+  sourceFileName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }

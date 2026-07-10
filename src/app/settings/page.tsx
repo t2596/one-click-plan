@@ -64,6 +64,7 @@ export default function SettingsPage() {
         scheduleEntries: await db.scheduleEntries.toArray(),
         reviewCards: await db.reviewCards.toArray(),
         planOutputs: await db.planOutputs.toArray(),
+        knowledgeEntries: await db.knowledgeEntries.toArray(),
         settings: await getSettings(),
         exportDate: new Date().toISOString(),
       };
@@ -97,6 +98,7 @@ export default function SettingsPage() {
         if (data.scheduleEntries) await db.scheduleEntries.bulkPut(data.scheduleEntries);
         if (data.reviewCards) await db.reviewCards.bulkPut(data.reviewCards);
         if (data.planOutputs) await db.planOutputs.bulkPut(data.planOutputs);
+        if (data.knowledgeEntries) await db.knowledgeEntries.bulkPut(data.knowledgeEntries);
 
         toast.success('数据导入成功，请刷新页面');
         setTimeout(() => window.location.reload(), 1500);

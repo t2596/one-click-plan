@@ -14,7 +14,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { v4 as uuidv4 } from 'uuid';
 import { formatDate, formatTime } from '@/lib/db';
-import { generatePlan } from '@/lib/ai-service';
+import { generatePlan, refinePlan, buildKnowledgeContext } from '@/lib/ai-service';
 import type { Plan, PlanItem, ScheduleEntry, ReviewCard, AIPlanItem } from '@/lib/types';
 import {
   Sparkles,
@@ -27,13 +27,27 @@ import {
   Brain,
   Clock,
   AlertCircle,
+  Edit3,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 const COLORS = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ef4444'];
 
+function getCategoryFromGoal(goal: string): string {
+  const g = goal.toLowerCase();
+  if (/python|java|javascript|typescript|rust|go|编程|代码|前端|后端|算法|数据结构|react|vue|node|web/.test(g)) return '编程语言';
+  if (/数学|概率|统计|线性代数|微积分|几何/.test(g)) return '数学';
+  if (/英语|雅思|托福|gre|日语|韩语|法语|德语|外语/.test(g)) return '英语';
+  if (/设计|ui|ux|figma|photoshop|配色|排版/.test(g)) return '设计';
+  if (/机器学习|深度学习|ai|人工智能|数据|神经网络|nlp/.test(g)) return '数据科学';
+  if (/计算机|网络|操作系统|数据库|linux|云计算/.test(g)) return '计算机科学';
+  return '其他';
+}
+
 export default function NewPlanPage() {
   const router = useRouter();
-  const { addPlan, bulkAddPlanItems, bulkAddScheduleEntries, addReviewCard } = usePlanStore();
+  const { addPlan, bulkAddPlanItems, bulkAddScheduleEntries, addReviewCard, addKnowledgeEntry, loadKnowledgeEntries } = usePlanStore();
 
   // Form state
   const [goal, setGoal] = useState('');
@@ -55,6 +69,9 @@ export default function NewPlanPage() {
   const [planTitle, setPlanTitle] = useState('');
   const [planDesc, setPlanDesc] = useState('');
   const [selectedColor, setSelectedColor] = useState(COLORS[0]);
+  const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
+  const [refineInstruction, setRefineInstruction] = useState('');
+  const [refining, setRefining] = useState(false);
 
   const handleGenerate = async () => {
     if (!goal.trim()) {
@@ -139,15 +156,12 @@ export default function NewPlanPage() {
       const phaseIndex = Math.min(Math.floor(dayIndex / Math.max(1, Math.ceil(totalDays / phases.length))), phases.length - 1);
       const phase = phases[phaseIndex];
       const topic = topics[dayIndex % topics.length];
-      const hour = 9 + Math.floor(Math.random() * 3);
-
       items.push({
         title: `[${phase}] ${topic} - 第${dayIndex + 1}天`,
         description: `学习 ${topic} 的${phase}部分，预计需要 ${hoursPerDay * 60} 分钟`,
         type: phaseIndex === 3 ? 'practice' : phaseIndex === 4 ? 'review' : 'study',
         estimatedMinutes: hoursPerDay * 60,
         suggestedDate: formatDate(currentDate),
-        suggestedStartTime: `${String(hour).padStart(2, '0')}:00`,
         reviewEnabled: true,
       });
 
@@ -204,19 +218,14 @@ export default function NewPlanPage() {
     // Create ScheduleEntries
     const scheduleEntries: ScheduleEntry[] = generatedPlan.items.map((item, idx) => {
       const planItemId = planItems[idx].id;
-      const startTime = item.suggestedStartTime;
-      const [h, m] = startTime.split(':').map(Number);
-      const endH = h + Math.floor((item.estimatedMinutes + (h * 60 + m) % 60) / 60);
-      const endM = (m + item.estimatedMinutes) % 60;
-      const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
 
       return {
         id: uuidv4(),
         planItemId,
         planId,
         date: item.suggestedDate,
-        startTime,
-        endTime,
+        startTime: '',
+        endTime: '',
         status: 'pending' as const,
         isCompleted: false,
         completedAt: null,
@@ -253,11 +262,67 @@ export default function NewPlanPage() {
     }
 
     router.push(`/plans/${planId}`);
+
+    // 自动创建知识记忆
+    try {
+      const now2 = new Date();
+      const knowledgeEntry = {
+        id: uuidv4(),
+        title: planTitle || generatedPlan.title,
+        content: `目标：${goal}\n描述：${planDesc || generatedPlan.description}\n共 ${generatedPlan.items.length} 个学习任务`,
+        category: getCategoryFromGoal(goal),
+        proficiency: 1,
+        source: 'auto_plan' as const,
+        sourceId: planId,
+        sourceFileName: null,
+        createdAt: now2,
+        updatedAt: now2,
+      };
+      await addKnowledgeEntry(knowledgeEntry);
+    } catch {
+      // 静默失败，不影响计划保存
+    }
   };
 
   const resetGeneration = () => {
     setGeneratedPlan(null);
     setError('');
+    setEditingItemIndex(null);
+    setRefineInstruction('');
+  };
+
+  const handleRefine = async () => {
+    if (!refineInstruction.trim() || !generatedPlan) return;
+    setRefining(true);
+    setError('');
+
+    try {
+      const result = await refinePlan({
+        goal: goal.trim(),
+        planTitle: planTitle || generatedPlan.title,
+        currentItems: generatedPlan.items,
+        refineInstruction: refineInstruction.trim(),
+      });
+
+      setGeneratedPlan({
+        title: result.planTitle,
+        description: result.planDescription,
+        items: result.planItems,
+      });
+      setRefineInstruction('');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '修改失败';
+      setError(message);
+    } finally {
+      setRefining(false);
+    }
+  };
+
+  const updateItem = (index: number, field: string, value: string | number | boolean) => {
+    if (!generatedPlan) return;
+    const items = [...generatedPlan.items];
+    items[index] = { ...items[index], [field]: value };
+    setGeneratedPlan({ ...generatedPlan, items });
   };
 
   if (generatedPlan) {
@@ -314,34 +379,157 @@ export default function NewPlanPage() {
               <BookOpen className="h-5 w-5" />
               计划项目 ({generatedPlan.items.length} 项)
             </CardTitle>
+            <CardDescription>点击项目可展开编辑</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2 max-h-96 overflow-y-auto">
+            <div className="space-y-2 max-h-[500px] overflow-y-auto">
               {generatedPlan.items.map((item, idx) => (
-                <div key={idx} className="flex items-center gap-3 p-3 rounded-lg border text-sm">
-                  <span className="text-muted-foreground w-6">{idx + 1}.</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">{item.title}</p>
-                    <p className="text-muted-foreground truncate">{item.description}</p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Badge variant="outline" className="gap-1">
-                      <CalendarDays className="h-3 w-3" />
-                      {item.suggestedDate}
-                    </Badge>
-                    <Badge variant="outline" className="gap-1">
-                      <Clock className="h-3 w-3" />
-                      {item.estimatedMinutes}分钟
-                    </Badge>
-                    {item.reviewEnabled && (
-                      <Badge variant="secondary" className="gap-1">
-                        <Brain className="h-3 w-3" />
-                        复习
+                <div key={idx}>
+                  <div
+                    className="flex items-center gap-3 p-3 rounded-lg border text-sm cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => setEditingItemIndex(editingItemIndex === idx ? null : idx)}
+                  >
+                    <span className="text-muted-foreground w-6">{idx + 1}.</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{item.title}</p>
+                      <p className="text-muted-foreground truncate">{item.description}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge variant="outline" className="gap-1">
+                        <CalendarDays className="h-3 w-3" />
+                        {item.suggestedDate}
                       </Badge>
-                    )}
+                      <Badge variant="outline" className="gap-1">
+                        <Clock className="h-3 w-3" />
+                        {item.estimatedMinutes}分钟
+                      </Badge>
+                      {item.reviewEnabled && (
+                        <Badge variant="secondary" className="gap-1">
+                          <Brain className="h-3 w-3" />
+                          复习
+                        </Badge>
+                      )}
+                      {editingItemIndex === idx ? (
+                        <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
                   </div>
+                  {editingItemIndex === idx && (
+                    <div className="p-3 border border-t-0 rounded-b-lg bg-muted/30 space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-xs">标题</Label>
+                          <Input
+                            value={item.title}
+                            onChange={e => updateItem(idx, 'title', e.target.value)}
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">类型</Label>
+                          <select
+                            value={item.type}
+                            onChange={e => updateItem(idx, 'type', e.target.value)}
+                            className="w-full h-8 text-sm rounded-md border bg-background px-2"
+                          >
+                            <option value="study">学习</option>
+                            <option value="practice">练习</option>
+                            <option value="review">复习</option>
+                            <option value="output">产出</option>
+                            <option value="other">其他</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs">描述</Label>
+                        <Textarea
+                          value={item.description}
+                          onChange={e => updateItem(idx, 'description', e.target.value)}
+                          rows={2}
+                          className="text-sm"
+                        />
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <Label className="text-xs">时长 (分钟)</Label>
+                          <Input
+                            type="number"
+                            value={item.estimatedMinutes}
+                            onChange={e => updateItem(idx, 'estimatedMinutes', Number(e.target.value))}
+                            className="h-8 text-sm"
+                            min={10}
+                            max={480}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">日期</Label>
+                          <Input
+                            type="date"
+                            value={item.suggestedDate}
+                            onChange={e => updateItem(idx, 'suggestedDate', e.target.value)}
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                        <div className="flex items-end pb-1">
+                          <label className="flex items-center gap-2 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={item.reviewEnabled}
+                              onChange={e => updateItem(idx, 'reviewEnabled', e.target.checked)}
+                              className="rounded"
+                            />
+                            启用复习
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* AI Refine Section */}
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Sparkles className="h-4 w-4 text-primary" />
+              AI 修改计划
+            </CardTitle>
+            <CardDescription>
+              告诉 AI 你想如何调整这个计划，AI 会在保留其他内容的基础上修改
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {error && (
+              <Alert variant="destructive" className="mb-3">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            <div className="flex gap-3">
+              <Input
+                placeholder="例如：把第三天的任务改成更基础的内容，第5天加入一个小测验..."
+                value={refineInstruction}
+                onChange={e => setRefineInstruction(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleRefine()}
+                className="flex-1"
+              />
+              <Button
+                onClick={handleRefine}
+                disabled={refining || !refineInstruction.trim()}
+                className="gap-2 shrink-0"
+              >
+                {refining ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Edit3 className="h-4 w-4" />
+                )}
+                {refining ? '修改中...' : 'AI 修改'}
+              </Button>
             </div>
           </CardContent>
         </Card>

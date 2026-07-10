@@ -14,6 +14,7 @@ import {
   Brain,
   FileText,
   Settings,
+  Database,
   ChevronLeft,
   Plus,
   Sparkles,
@@ -25,6 +26,7 @@ const navItems = [
   { href: '/calendar', label: '日历视图', icon: CalendarDays },
   { href: '/review', label: '复习中心', icon: Brain },
   { href: '/outputs', label: '产出库', icon: FileText },
+  { href: '/knowledge', label: '知识库', icon: Database },
   { href: '/settings', label: '设置', icon: Settings },
 ];
 
