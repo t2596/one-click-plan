@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { v4 as uuidv4 } from 'uuid';
 import { formatDate, formatTime } from '@/lib/db';
 import { generatePlan, refinePlan, buildKnowledgeContext } from '@/lib/ai-service';
@@ -72,6 +73,7 @@ export default function NewPlanPage() {
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [refineInstruction, setRefineInstruction] = useState('');
   const [refining, setRefining] = useState(false);
+  const [autoPlanMode, setAutoPlanMode] = useState(false);
 
   const handleGenerate = async () => {
     if (!goal.trim()) {
@@ -86,9 +88,9 @@ export default function NewPlanPage() {
       // 尝试调用 AI API 生成计划
       const result = await generatePlan({
         goal: goal.trim(),
-        availableHoursPerDay,
-        startDate,
-        endDate,
+        availableHoursPerDay: autoPlanMode ? undefined : availableHoursPerDay,
+        startDate: autoPlanMode ? undefined : startDate,
+        endDate: autoPlanMode ? undefined : endDate,
         preferences: preferences.trim(),
       });
 
@@ -144,8 +146,15 @@ export default function NewPlanPage() {
     if (topics.length === 0) topics.push(planGoal);
 
     const items: AIPlanItem[] = [];
-    const startD = new Date(start);
-    const endD = new Date(end);
+    let startD = new Date(start);
+    let endD = new Date(end);
+
+    // Auto mode: use reasonable defaults
+    if (autoPlanMode || !start || !end) {
+      startD = new Date(); startD.setDate(startD.getDate() + 1); // start tomorrow
+      endD = new Date(startD); endD.setDate(endD.getDate() + 20); // 3 weeks default
+    }
+
     const totalDays = Math.max(1, Math.ceil((endD.getTime() - startD.getTime()) / (1000 * 60 * 60 * 24)));
 
     let currentDate = new Date(startD);
@@ -160,7 +169,7 @@ export default function NewPlanPage() {
         title: `[${phase}] ${topic} - 第${dayIndex + 1}天`,
         description: `学习 ${topic} 的${phase}部分，预计需要 ${hoursPerDay * 60} 分钟`,
         type: phaseIndex === 3 ? 'practice' : phaseIndex === 4 ? 'review' : 'study',
-        estimatedMinutes: hoursPerDay * 60,
+        estimatedMinutes: autoPlanMode ? 60 : hoursPerDay * 60,
         suggestedDate: formatDate(currentDate),
         reviewEnabled: true,
       });
@@ -171,7 +180,9 @@ export default function NewPlanPage() {
 
     return {
       title: `${planGoal} - 学习计划`,
-      description: `为期 ${totalDays} 天的系统学习计划，每天 ${hoursPerDay} 小时`,
+      description: autoPlanMode
+        ? `AI 自主规划的 ${totalDays} 天系统学习计划`
+        : `为期 ${totalDays} 天的系统学习计划，每天 ${hoursPerDay} 小时`,
       items,
     };
   }
@@ -583,39 +594,56 @@ export default function NewPlanPage() {
             />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="flex items-center justify-between p-4 rounded-lg border bg-muted/30">
             <div>
-              <Label>每天可用时间 (小时)</Label>
-              <Input
-                type="number"
-                value={availableHoursPerDay}
-                onChange={e => setAvailableHoursPerDay(Number(e.target.value))}
-                min={0.5}
-                max={12}
-                step={0.5}
-                className="mt-2"
-              />
+              <p className="font-medium text-sm">AI 自主规划</p>
+              <p className="text-xs text-muted-foreground">
+                让 AI 根据目标难度，自动判断学习周期和每日投入时间
+              </p>
             </div>
-            <div>
-              <Label>开始日期</Label>
-              <Input
-                type="date"
-                value={startDate}
-                onChange={e => setStartDate(e.target.value)}
-                className="mt-2"
-              />
-            </div>
-          </div>
-
-          <div>
-            <Label>结束日期</Label>
-            <Input
-              type="date"
-              value={endDate}
-              onChange={e => setEndDate(e.target.value)}
-              className="mt-2"
+            <Switch
+              checked={autoPlanMode}
+              onCheckedChange={setAutoPlanMode}
             />
           </div>
+
+          {!autoPlanMode && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label>每天可用时间 (小时)</Label>
+                  <Input
+                    type="number"
+                    value={availableHoursPerDay}
+                    onChange={e => setAvailableHoursPerDay(Number(e.target.value))}
+                    min={0.5}
+                    max={12}
+                    step={0.5}
+                    className="mt-2"
+                  />
+                </div>
+                <div>
+                  <Label>开始日期</Label>
+                  <Input
+                    type="date"
+                    value={startDate}
+                    onChange={e => setStartDate(e.target.value)}
+                    className="mt-2"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label>结束日期</Label>
+                <Input
+                  type="date"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  className="mt-2"
+                />
+              </div>
+            </>
+          )}
 
           <div>
             <Label>额外偏好（可选）</Label>

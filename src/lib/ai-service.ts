@@ -62,25 +62,76 @@ function buildSystemPrompt(knowledgeContext?: string): string {
 8. 不要生成具体的学习时间（如几点到几点），只需给出每天的学习时长即可`;
 }
 
+function buildSystemPromptAuto(knowledgeContext?: string): string {
+  const knowledgeSection = knowledgeContext
+    ? `\n\n用户已掌握以下知识背景：\n${knowledgeContext}\n\n请在此基础上制定计划，避免重复已掌握的基础内容，可以直接从进阶内容开始。`
+    : '';
+
+  return `你是一个专业的学习计划设计师。你的任务是根据用户的学习目标，自主判断合理的学习周期和每日投入时间，生成一份结构化、可执行的每日学习计划。${knowledgeSection}
+
+你必须严格按照以下 JSON 格式输出（不要输出任何其他内容，只输出 JSON）：
+
+{
+  "planTitle": "计划的标题",
+  "planDescription": "计划的简短描述（一句话）",
+  "planItems": [
+    {
+      "title": "每日学习任务的标题（简洁）",
+      "description": "当天任务的具体描述，包含学习内容和目标",
+      "type": "study",
+      "estimatedMinutes": 60,
+      "suggestedDate": "2026-01-01",
+      "reviewEnabled": true
+    }
+  ]
+}
+
+规则：
+1. 你需要根据学习目标的难度，自主判断合理的总天数（通常在7-60天之间）和每天的学习时长（通常在30-180分钟之间）
+2. type 必须是以下之一：study（学习）、practice（练习）、review（复习）、output（产出）、other（其他）
+3. 按阶段组织：入门基础 -> 核心概念 -> 进阶深入 -> 实践练习 -> 总结复习
+4. 每个阶段的长度要合理，难的内容分配更多天数
+5. reviewEnabled 通常设为 true，表示该内容需要后续复习
+6. 每天的任务要有明确、可执行的内容，不要笼统的描述
+7. 加入适当的休息日和弹性调整空间
+8. 不要生成具体的学习时间（如几点到几点），只需给出每天的学习时长即可
+9. suggestedDate 从明天开始排，格式为 YYYY-MM-DD`;
+}
+
 function buildUserPrompt(
   goal: string,
-  availableHoursPerDay: number,
-  startDate: string,
-  endDate: string,
+  availableHoursPerDay: number | null,
+  startDate: string | null,
+  endDate: string | null,
   preferences: string
 ): string {
-  const days = Math.ceil(
-    (new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)
-  );
+  const parts: string[] = [`学习目标：${goal}`];
 
-  return `学习目标：${goal}
-每天可用学习时间：${availableHoursPerDay} 小时（${availableHoursPerDay * 60} 分钟）
-计划开始日期：${startDate}
-计划结束日期：${endDate}
-总共 ${days + 1} 天
-${preferences ? `额外偏好：${preferences}` : ''}
+  if (availableHoursPerDay !== null) {
+    parts.push(`每天可用学习时间：${availableHoursPerDay} 小时（${availableHoursPerDay * 60} 分钟）`);
+  } else {
+    parts.push('每天可用学习时间：由你根据目标难度自主判断');
+  }
 
-请为这段时间生成详细的每日学习计划。确保每一天都有具体的学习任务，并按阶段渐进式推进。`;
+  if (startDate !== null) {
+    parts.push(`计划开始日期：${startDate}`);
+  }
+
+  if (endDate !== null && startDate !== null) {
+    const days = Math.ceil(
+      (new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)
+    );
+    parts.push(`计划结束日期：${endDate}`);
+    parts.push(`总共 ${days + 1} 天`);
+  } else {
+    parts.push('学习周期：由你根据目标难度自主判断合理的天数');
+  }
+
+  if (preferences) {
+    parts.push(`额外偏好：${preferences}`);
+  }
+
+  return parts.join('\n') + '\n\n请为这段时间生成详细的每日学习计划。确保每一天都有具体的学习任务，并按阶段渐进式推进。';
 }
 
 function parseAIResponse(content: string): AIGenerateResponse {
@@ -148,12 +199,18 @@ export async function buildKnowledgeContext(): Promise<string> {
  */
 export async function generatePlan(params: {
   goal: string;
-  availableHoursPerDay: number;
-  startDate: string;
-  endDate: string;
-  preferences: string;
+  availableHoursPerDay?: number;
+  startDate?: string;
+  endDate?: string;
+  preferences?: string;
 }): Promise<AIGenerateResponse> {
-  const { goal, availableHoursPerDay, startDate, endDate, preferences } = params;
+  const {
+    goal,
+    availableHoursPerDay = null,
+    startDate = null,
+    endDate = null,
+    preferences = '',
+  } = params;
 
   const settings = await getSettings();
   const knowledgeContext = await buildKnowledgeContext();
@@ -167,9 +224,15 @@ export async function generatePlan(params: {
   const baseUrl = getBaseUrl(settings.aiProvider, settings.aiBaseUrl);
   const apiUrl = `${baseUrl}/chat/completions`;
 
+  // 如果用户指定了时间参数，用精确 prompt；否则用自主规划 prompt
+  const isAutoMode = availableHoursPerDay === null || startDate === null || endDate === null;
+  const systemPrompt = isAutoMode
+    ? buildSystemPromptAuto(knowledgeContext)
+    : buildSystemPrompt(knowledgeContext);
+
   const messages: ChatMessage[] = [
-    { role: 'system', content: buildSystemPrompt(knowledgeContext) },
-    { role: 'user', content: buildUserPrompt(goal, availableHoursPerDay, startDate, endDate, preferences) },
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: buildUserPrompt(goal, availableHoursPerDay as number | null, startDate as string | null, endDate as string | null, preferences) },
   ];
 
   const response = await fetch(apiUrl, {
