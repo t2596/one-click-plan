@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { usePlanStore, useUIStore } from '@/lib/store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ import {
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
 
 export default function CalendarPage() {
+  const router = useRouter();
   const { calendarView, selectedDate, setCalendarView, setSelectedDate } = useUIStore();
   const { weekSchedule, todaySchedule, loadWeekSchedule, loadTodaySchedule, editScheduleEntry, plans } = usePlanStore();
   const [loading, setLoading] = useState(true);
@@ -156,10 +158,12 @@ export default function CalendarPage() {
                         backgroundColor: getColorForPlan(entry.planId) + '20',
                         borderLeft: `3px solid ${getColorForPlan(entry.planId)}`,
                       }}
-                      onClick={() => handleToggleTask(entry.id, entry.isCompleted)}
+                      onClick={() => router.push(`/tasks/${entry.planItemId}`)}
                     >
                       <div className="flex items-center gap-1 mb-1">
-                        {statusIcon(entry.status)}
+                        <span onClick={e => { e.stopPropagation(); handleToggleTask(entry.id, entry.isCompleted); }}>
+                          {statusIcon(entry.status)}
+                        </span>
                         <span className="text-muted-foreground">{entry.startTime}</span>
                       </div>
                       <p className={`font-medium truncate ${entry.isCompleted ? 'line-through text-muted-foreground' : ''}`}>
@@ -200,9 +204,11 @@ export default function CalendarPage() {
                   <div
                     key={task.id}
                     className="flex items-center gap-3 p-3 rounded-lg border cursor-pointer hover:bg-muted/50"
-                    onClick={() => handleToggleTask(task.id, task.isCompleted)}
+                    onClick={() => router.push(`/tasks/${task.planItemId}`)}
                   >
-                    {statusIcon(task.status)}
+                    <span onClick={e => { e.stopPropagation(); handleToggleTask(task.id, task.isCompleted); }}>
+                      {statusIcon(task.status)}
+                    </span>
                     <div className="flex-1">
                       <p className={`font-medium ${task.isCompleted ? 'line-through text-muted-foreground' : ''}`}>
                         {task.notes || '未命名任务'}

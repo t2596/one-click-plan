@@ -1,21 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { usePlanStore } from '@/lib/store';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { v4 as uuidv4 } from 'uuid';
-import dynamic from 'next/dynamic';
 import type { PlanOutput } from '@/lib/types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   FileText,
   Plus,
@@ -26,37 +21,23 @@ import {
   Folder,
   ChevronRight,
   ChevronDown,
-  BookOpen,
   Layers,
 } from 'lucide-react';
 
-// 动态导入 MD 编辑器以避免 SSR 问题
-const MDEditor = dynamic(
-  () => import('@uiw/react-md-editor').then(mod => mod.default),
-  { ssr: false }
-);
-
 export default function OutputsPage() {
+  const router = useRouter();
   const {
     outputs,
     plans,
     loadAllOutputs,
     loadPlans,
-    addOutput,
-    editOutput,
     removeOutput,
-    searchInOutputs,
   } = usePlanStore();
 
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null); // null=全部, '__uncategorized__'=未归类
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [expandedPlans, setExpandedPlans] = useState<Set<string>>(new Set());
-  const [showEditor, setShowEditor] = useState(false);
-  const [editingOutput, setEditingOutput] = useState<PlanOutput | null>(null);
-  const [editTitle, setEditTitle] = useState('');
-  const [editContent, setEditContent] = useState('');
-  const [editorMode, setEditorMode] = useState<'edit' | 'preview' | 'split'>('split');
 
   useEffect(() => {
     async function init() {
@@ -134,43 +115,12 @@ export default function OutputsPage() {
     }
   };
 
-  const handleSave = async () => {
-    if (!editTitle.trim()) return;
-
-    if (editingOutput) {
-      await editOutput(editingOutput.id, { title: editTitle, content: editContent });
-    } else {
-      const output: PlanOutput = {
-        id: uuidv4(),
-        planId: selectedPlanId && selectedPlanId !== '__uncategorized__' ? selectedPlanId : '',
-        planItemId: null,
-        title: editTitle,
-        content: editContent,
-        tags: [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      await addOutput(output);
-    }
-
-    setShowEditor(false);
-    setEditingOutput(null);
-    setEditTitle('');
-    setEditContent('');
-  };
-
   const handleEdit = (output: PlanOutput) => {
-    setEditingOutput(output);
-    setEditTitle(output.title);
-    setEditContent(output.content);
-    setShowEditor(true);
+    router.push(`/outputs/${output.id}`);
   };
 
   const handleNew = () => {
-    setEditingOutput(null);
-    setEditTitle('');
-    setEditContent('');
-    setShowEditor(true);
+    router.push('/outputs/new');
   };
 
   const handleDelete = async (id: string) => {
@@ -394,10 +344,11 @@ export default function OutputsPage() {
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-sm text-muted-foreground line-clamp-3 whitespace-pre-wrap">
-                        {output.content.slice(0, 200)}
-                        {output.content.length > 200 ? '...' : ''}
-                      </p>
+                      <div className="text-sm text-muted-foreground line-clamp-3 prose prose-sm max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {output.content.slice(0, 300) + (output.content.length > 300 ? '...' : '')}
+                        </ReactMarkdown>
+                      </div>
                       {output.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-3">
                           {output.tags.map(tag => (
@@ -413,61 +364,6 @@ export default function OutputsPage() {
           </div>
         </ScrollArea>
       </div>
-
-      {/* 全屏编辑器 Dialog */}
-      <Dialog open={showEditor} onOpenChange={setShowEditor}>
-        <DialogContent className="max-w-5xl w-[95vw] h-[90vh] flex flex-col p-0">
-          <DialogHeader className="px-6 pt-6 pb-0 shrink-0">
-            <div className="flex items-center justify-between">
-              <DialogTitle>{editingOutput ? '编辑笔记' : '新建笔记'}</DialogTitle>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant={editorMode === 'edit' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setEditorMode('edit')}
-                >
-                  编辑
-                </Button>
-                <Button
-                  variant={editorMode === 'split' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setEditorMode('split')}
-                >
-                  分屏
-                </Button>
-                <Button
-                  variant={editorMode === 'preview' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setEditorMode('preview')}
-                >
-                  预览
-                </Button>
-              </div>
-            </div>
-          </DialogHeader>
-          <div className="px-6 pt-3 shrink-0">
-            <Input
-              placeholder="笔记标题"
-              value={editTitle}
-              onChange={e => setEditTitle(e.target.value)}
-              className="text-lg font-semibold border-none px-0 focus-visible:ring-0"
-            />
-          </div>
-          <div className="flex-1 min-h-0 px-6 pb-3" data-color-mode="light">
-            <MDEditor
-              value={editContent}
-              onChange={val => setEditContent(val || '')}
-              height="100%"
-              visibleDragbar={false}
-              preview={editorMode === 'preview' ? 'preview' : editorMode === 'edit' ? 'edit' : 'live'}
-            />
-          </div>
-          <div className="flex justify-end gap-3 px-6 py-3 border-t shrink-0">
-            <Button variant="outline" onClick={() => setShowEditor(false)}>取消</Button>
-            <Button onClick={handleSave} disabled={!editTitle.trim()}>保存</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

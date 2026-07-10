@@ -56,7 +56,7 @@ function buildSystemPrompt(knowledgeContext?: string): string {
 }
 
 规则：
-1. planItems 数组必须覆盖用户指定的整个日期范围，每天一条
+1. planItems 必须严格按照用户指定的可用学习日排期，不可在非学习日安排任务
 2. type 必须是以下之一：study（学习）、practice（练习）、review（复习）、output（产出）、other（其他）
 3. 按阶段组织：入门基础 -> 核心概念 -> 进阶深入 -> 实践练习 -> 总结复习
 4. estimatedMinutes 应等于用户每天可用时间（分钟）
@@ -96,14 +96,15 @@ function buildSystemPromptAuto(knowledgeContext?: string): string {
 
 规则：
 1. 你需要根据学习目标的难度，自主判断合理的总天数（通常在7-60天之间）和每天的学习时长（通常在30-180分钟之间）
-2. type 必须是以下之一：study（学习）、practice（练习）、review（复习）、output（产出）、other（其他）
-3. 按阶段组织：入门基础 -> 核心概念 -> 进阶深入 -> 实践练习 -> 总结复习
-4. 每个阶段的长度要合理，难的内容分配更多天数
-5. reviewEnabled 通常设为 true，表示该内容需要后续复习
-6. 每天的任务要有明确、可执行的内容，不要笼统的描述
-7. 加入适当的休息日和弹性调整空间
-8. 不要生成具体的学习时间（如几点到几点），只需给出每天的学习时长即可
-9. suggestedDate 从明天（${shiftDateStr(today, 1)}）开始排，格式为 YYYY-MM-DD`;
+2. planItems 必须严格按照用户指定的可用学习日排期，不可在非学习日安排任务
+3. type 必须是以下之一：study（学习）、practice（练习）、review（复习）、output（产出）、other（其他）
+4. 按阶段组织：入门基础 -> 核心概念 -> 进阶深入 -> 实践练习 -> 总结复习
+5. 每个阶段的长度要合理，难的内容分配更多天数
+6. reviewEnabled 通常设为 true，表示该内容需要后续复习
+7. 每天的任务要有明确、可执行的内容，不要笼统的描述
+8. 加入适当的休息日和弹性调整空间
+9. 不要生成具体的学习时间（如几点到几点），只需给出每天的学习时长即可
+10. suggestedDate 从明天（${shiftDateStr(today, 1)}）开始排，格式为 YYYY-MM-DD`;
 }
 
 function shiftDateStr(dateStr: string, days: number): string {
@@ -117,7 +118,8 @@ function buildUserPrompt(
   availableHoursPerDay: number | null,
   startDate: string | null,
   endDate: string | null,
-  preferences: string
+  preferences: string,
+  availableDays: string[],
 ): string {
   const parts: string[] = [`学习目标：${goal}`];
 
@@ -139,6 +141,16 @@ function buildUserPrompt(
     parts.push(`总共 ${days + 1} 天`);
   } else {
     parts.push('学习周期：由你根据目标难度自主判断合理的天数');
+  }
+
+  // 学习日说明
+  if (availableDays.length > 0) {
+    const dayLabels: Record<string, string> = {
+      monday: '周一', tuesday: '周二', wednesday: '周三', thursday: '周四',
+      friday: '周五', saturday: '周六', sunday: '周日',
+    };
+    const dayNames = availableDays.map(d => dayLabels[d] || d).join('、');
+    parts.push(`每周学习日：仅 ${dayNames}（请严格只在这些日期安排学习任务，不要在非学习日排任何任务）`);
   }
 
   if (preferences) {
@@ -217,6 +229,7 @@ export async function generatePlan(params: {
   startDate?: string;
   endDate?: string;
   preferences?: string;
+  availableDays?: string[];
 }): Promise<AIGenerateResponse> {
   const {
     goal,
@@ -224,6 +237,7 @@ export async function generatePlan(params: {
     startDate = null,
     endDate = null,
     preferences = '',
+    availableDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
   } = params;
 
   const settings = await getSettings();
@@ -246,7 +260,7 @@ export async function generatePlan(params: {
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: buildUserPrompt(goal, availableHoursPerDay as number | null, startDate as string | null, endDate as string | null, preferences) },
+    { role: 'user', content: buildUserPrompt(goal, availableHoursPerDay as number | null, startDate as string | null, endDate as string | null, preferences, availableDays) },
   ];
 
   const response = await fetch(apiUrl, {

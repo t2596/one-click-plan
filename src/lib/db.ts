@@ -31,6 +31,11 @@ class PlanDatabase extends Dexie {
     this.version(3).stores({
       knowledgeEntries: 'id, category, source, createdAt',
     });
+
+    // v4: knowledgeEntries 添加 sourceId 索引
+    this.version(4).stores({
+      knowledgeEntries: 'id, category, source, sourceId, createdAt',
+    });
   }
 }
 

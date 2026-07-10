@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { usePlanStore } from '@/lib/store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react';
 
 export default function DashboardPage() {
+  const router = useRouter();
   const {
     plans,
     todaySchedule,
@@ -174,7 +176,8 @@ export default function DashboardPage() {
                   {todayTasks.map(task => (
                     <div
                       key={task.id}
-                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors"
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                      onClick={() => router.push(`/tasks/${task.planItemId}`)}
                     >
                       {statusIcon(task.status)}
                       <div className="flex-1 min-w-0">

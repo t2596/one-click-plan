@@ -35,6 +35,16 @@ import {
 
 const COLORS = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ef4444'];
 
+const WEEKDAYS = [
+  { key: 'monday', label: '一' },
+  { key: 'tuesday', label: '二' },
+  { key: 'wednesday', label: '三' },
+  { key: 'thursday', label: '四' },
+  { key: 'friday', label: '五' },
+  { key: 'saturday', label: '六' },
+  { key: 'sunday', label: '日' },
+];
+
 function getCategoryFromGoal(goal: string): string {
   const g = goal.toLowerCase();
   if (/python|java|javascript|typescript|rust|go|编程|代码|前端|后端|算法|数据结构|react|vue|node|web/.test(g)) return '编程语言';
@@ -74,6 +84,7 @@ export default function NewPlanPage() {
   const [refineInstruction, setRefineInstruction] = useState('');
   const [refining, setRefining] = useState(false);
   const [autoPlanMode, setAutoPlanMode] = useState(false);
+  const [availableDays, setAvailableDays] = useState<string[]>(['monday', 'tuesday', 'wednesday', 'thursday', 'friday']);
 
   const handleGenerate = async () => {
     if (!goal.trim()) {
@@ -92,6 +103,7 @@ export default function NewPlanPage() {
         startDate: autoPlanMode ? undefined : startDate,
         endDate: autoPlanMode ? undefined : endDate,
         preferences: preferences.trim(),
+        availableDays,
       });
 
       const mapped = {
@@ -115,7 +127,8 @@ export default function NewPlanPage() {
           goal.trim(),
           availableHoursPerDay,
           startDate,
-          endDate
+          endDate,
+          availableDays,
         );
 
         // 延迟一下让用户看到提示
@@ -140,7 +153,8 @@ export default function NewPlanPage() {
     planGoal: string,
     hoursPerDay: number,
     start: string,
-    end: string
+    end: string,
+    studyDays: string[],
   ) {
     const topics = planGoal.split(/[,，、\s]+/).filter(Boolean);
     if (topics.length === 0) topics.push(planGoal);
@@ -155,14 +169,26 @@ export default function NewPlanPage() {
       endD = new Date(startD); endD.setDate(endD.getDate() + 20); // 3 weeks default
     }
 
-    const totalDays = Math.max(1, Math.ceil((endD.getTime() - startD.getTime()) / (1000 * 60 * 60 * 24)));
+    // Day-of-week map: getDay() returns 0=Sun, 1=Mon, ..., 6=Sat
+    const weekdayMap: Record<string, number> = {
+      sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+      thursday: 4, friday: 5, saturday: 6,
+    };
 
     let currentDate = new Date(startD);
     let dayIndex = 0;
     const phases = ['入门基础', '核心概念', '进阶深入', '实践练习', '总结复习'];
 
-    while (currentDate <= endD && dayIndex < totalDays) {
-      const phaseIndex = Math.min(Math.floor(dayIndex / Math.max(1, Math.ceil(totalDays / phases.length))), phases.length - 1);
+    while (currentDate <= endD) {
+      // Skip non-study days
+      const dow = currentDate.getDay();
+      const isStudyDay = studyDays.some(d => weekdayMap[d] === dow);
+      if (!isStudyDay) {
+        currentDate.setDate(currentDate.getDate() + 1);
+        continue;
+      }
+
+      const phaseIndex = Math.min(Math.floor(dayIndex / 4), phases.length - 1);
       const phase = phases[phaseIndex];
       const topic = topics[dayIndex % topics.length];
       items.push({
@@ -181,8 +207,8 @@ export default function NewPlanPage() {
     return {
       title: `${planGoal} - 学习计划`,
       description: autoPlanMode
-        ? `AI 自主规划的 ${totalDays} 天系统学习计划`
-        : `为期 ${totalDays} 天的系统学习计划，每天 ${hoursPerDay} 小时`,
+        ? `AI 自主规划的 ${items.length} 天系统学习计划`
+        : `为期 ${items.length} 天的系统学习计划，每天 ${hoursPerDay} 小时`,
       items,
     };
   }
@@ -605,6 +631,38 @@ export default function NewPlanPage() {
               checked={autoPlanMode}
               onCheckedChange={setAutoPlanMode}
             />
+          </div>
+
+          <div>
+            <Label className="text-sm">每周学习日</Label>
+            <p className="text-xs text-muted-foreground mb-2">选择每周哪几天安排学习任务</p>
+            <div className="flex gap-1.5">
+              {WEEKDAYS.map(day => {
+                const selected = availableDays.includes(day.key);
+                return (
+                  <button
+                    key={day.key}
+                    type="button"
+                    className={`w-10 h-10 rounded-full text-sm font-medium transition-all border-2 ${
+                      selected
+                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                        : 'bg-background border-border text-muted-foreground hover:border-primary/50'
+                    }`}
+                    onClick={() => {
+                      if (selected) {
+                        if (availableDays.length > 1) {
+                          setAvailableDays(availableDays.filter(d => d !== day.key));
+                        }
+                      } else {
+                        setAvailableDays([...availableDays, day.key]);
+                      }
+                    }}
+                  >
+                    {day.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {!autoPlanMode && (

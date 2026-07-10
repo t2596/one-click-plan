@@ -327,7 +327,11 @@ export default function PlanDetailPage() {
           ) : (
             <div className="space-y-2">
               {planItems.map((item, index) => (
-                <Card key={item.id} className="hover:shadow-sm transition-shadow">
+                <Card
+                  key={item.id}
+                  className="hover:shadow-sm transition-shadow cursor-pointer"
+                  onClick={() => router.push(`/tasks/${item.id}`)}
+                >
                   <CardContent className="py-3">
                     <div className="flex items-center gap-3">
                       <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -349,7 +353,12 @@ export default function PlanDetailPage() {
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-destructive"
-                        onClick={() => removePlanItem(item.id)}
+                        onClick={e => {
+                          e.stopPropagation();
+                          if (confirm('确定要删除这个任务吗？')) {
+                            removePlanItem(item.id);
+                          }
+                        }}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -432,7 +441,7 @@ export default function PlanDetailPage() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
-                          onClick={() => router.push(`/outputs?edit=${output.id}`)}
+                          onClick={() => router.push(`/outputs/${output.id}`)}
                         >
                           <Edit3 className="h-4 w-4" />
                         </Button>
