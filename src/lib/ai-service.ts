@@ -32,7 +32,11 @@ function buildSystemPrompt(knowledgeContext?: string): string {
     ? `\n\n用户已掌握以下知识背景：\n${knowledgeContext}\n\n请在此基础上制定计划，避免重复已掌握的基础内容，可以直接从进阶内容开始。`
     : '';
 
+  const today = new Date().toISOString().split('T')[0];
+
   return `你是一个专业的学习计划设计师。你的任务是根据用户的学习目标，生成一份结构化、可执行的每日学习计划。${knowledgeSection}
+
+今天是 ${today}。
 
 你必须严格按照以下 JSON 格式输出（不要输出任何其他内容，只输出 JSON）：
 
@@ -45,7 +49,7 @@ function buildSystemPrompt(knowledgeContext?: string): string {
       "description": "当天任务的具体描述，包含学习内容和目标",
       "type": "study",
       "estimatedMinutes": 60,
-      "suggestedDate": "2026-01-01",
+      "suggestedDate": "${today}",
       "reviewEnabled": true
     }
   ]
@@ -67,7 +71,11 @@ function buildSystemPromptAuto(knowledgeContext?: string): string {
     ? `\n\n用户已掌握以下知识背景：\n${knowledgeContext}\n\n请在此基础上制定计划，避免重复已掌握的基础内容，可以直接从进阶内容开始。`
     : '';
 
+  const today = new Date().toISOString().split('T')[0];
+
   return `你是一个专业的学习计划设计师。你的任务是根据用户的学习目标，自主判断合理的学习周期和每日投入时间，生成一份结构化、可执行的每日学习计划。${knowledgeSection}
+
+今天是 ${today}。
 
 你必须严格按照以下 JSON 格式输出（不要输出任何其他内容，只输出 JSON）：
 
@@ -80,7 +88,7 @@ function buildSystemPromptAuto(knowledgeContext?: string): string {
       "description": "当天任务的具体描述，包含学习内容和目标",
       "type": "study",
       "estimatedMinutes": 60,
-      "suggestedDate": "2026-01-01",
+      "suggestedDate": "${today}",
       "reviewEnabled": true
     }
   ]
@@ -95,7 +103,13 @@ function buildSystemPromptAuto(knowledgeContext?: string): string {
 6. 每天的任务要有明确、可执行的内容，不要笼统的描述
 7. 加入适当的休息日和弹性调整空间
 8. 不要生成具体的学习时间（如几点到几点），只需给出每天的学习时长即可
-9. suggestedDate 从明天开始排，格式为 YYYY-MM-DD`;
+9. suggestedDate 从明天（${shiftDateStr(today, 1)}）开始排，格式为 YYYY-MM-DD`;
+}
+
+function shiftDateStr(dateStr: string, days: number): string {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
 }
 
 function buildUserPrompt(
