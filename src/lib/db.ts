@@ -62,6 +62,8 @@ export async function deletePlan(id: string): Promise<void> {
     await db.reviewCards.where('planId').equals(id).delete();
     await db.planOutputs.where('planId').equals(id).delete();
   });
+  // 级联删除关联的知识库条目
+  await db.knowledgeEntries.where('sourceId').equals(id).delete();
 }
 
 // ========== PlanItem 操作 ==========

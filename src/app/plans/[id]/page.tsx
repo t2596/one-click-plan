@@ -46,6 +46,7 @@ export default function PlanDetailPage() {
     loadPlanItems,
     loadPlanOutputs,
     editPlan,
+    removePlan,
     addPlanItem,
     editPlanItem,
     removePlanItem,
@@ -208,6 +209,20 @@ export default function PlanDetailPage() {
           >
             <ChevronRight className="h-4 w-4" />
             推迟计划
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1 text-destructive hover:text-destructive"
+            onClick={() => {
+              if (confirm(`确定要删除计划「${currentPlan.title}」吗？\n删除后，关联的日程、复习和笔记也将一并删除，此操作不可恢复。`)) {
+                removePlan(currentPlan.id);
+                router.push('/plans');
+              }
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+            删除
           </Button>
         </div>
       </div>

@@ -14,6 +14,7 @@ import {
   Play,
   Pause,
   CheckCircle,
+  Trash2,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -23,7 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 export default function PlansPage() {
-  const { plans, loadPlans, editPlan } = usePlanStore();
+  const { plans, loadPlans, editPlan, removePlan } = usePlanStore();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -130,6 +131,17 @@ export default function PlansPage() {
                           }}
                         >
                           <CheckCircle className="h-4 w-4 mr-2" /> 标记完成
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-destructive"
+                          onClick={e => {
+                            e.preventDefault();
+                            if (confirm(`确定要删除计划「${plan.title}」吗？\n删除后，关联的日程、复习和笔记也将一并删除，此操作不可恢复。`)) {
+                              removePlan(plan.id);
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" /> 删除
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
