@@ -160,8 +160,76 @@ function buildUserPrompt(
   return parts.join('\n') + '\n\n请为这段时间生成详细的每日学习计划。确保每一天都有具体的学习任务，并按阶段渐进式推进。';
 }
 
+/**
+ * 修复常见的 AI 生成 JSON 格式问题
+ */
+function repairJSON(jsonStr: string): string {
+  let repaired = jsonStr;
+
+  // 1. 移除 trailing commas（在 ] 或 } 前多余的逗号）
+  repaired = repaired.replace(/,(\s*[}\]])/g, '$1');
+
+  // 2. 尝试修复被截断的 JSON
+  let openBraces = 0, closeBraces = 0, openBrackets = 0, closeBrackets = 0;
+  for (const ch of repaired) {
+    if (ch === '{') openBraces++;
+    if (ch === '}') closeBraces++;
+    if (ch === '[') openBrackets++;
+    if (ch === ']') closeBrackets++;
+  }
+
+  if (openBraces > closeBraces || openBrackets > closeBrackets) {
+    // 找到最后一个完整的对象边界，截断不完整部分
+    const lastComplete = Math.max(
+      repaired.lastIndexOf('},\n'),
+      repaired.lastIndexOf('}\n'),
+      repaired.lastIndexOf('},'),
+    );
+    if (lastComplete > 0) {
+      repaired = repaired.slice(0, lastComplete + 1);
+      // 重新计数
+      openBraces = 0; closeBraces = 0; openBrackets = 0; closeBrackets = 0;
+      for (const ch of repaired) {
+        if (ch === '{') openBraces++;
+        if (ch === '}') closeBraces++;
+        if (ch === '[') openBrackets++;
+        if (ch === ']') closeBrackets++;
+      }
+    }
+
+    repaired += ']'.repeat(Math.max(0, openBrackets - closeBrackets));
+    repaired += '}'.repeat(Math.max(0, openBraces - closeBraces));
+  }
+
+  return repaired;
+}
+
+/**
+ * 从 AI 返回的原始文本中提取 planItems（正则兜底方案）
+ */
+function extractPlanItemsFromRawText(content: string): AIPlanItem[] {
+  const items: AIPlanItem[] = [];
+
+  // 匹配每个 planItem 对象（容错模式）
+  const itemRegex = /\{\s*"title"\s*:\s*"([^"]*)"[^}]*"description"\s*:\s*"([^"]*)"[^}]*"type"\s*:\s*"([^"]*)"[^}]*"estimatedMinutes"\s*:\s*(\d+)[^}]*"suggestedDate"\s*:\s*"([^"]*)"[^}]*"reviewEnabled"\s*:\s*(true|false)[^}]*\}/g;
+
+  let match;
+  while ((match = itemRegex.exec(content)) !== null) {
+    const validTypes = ['study', 'practice', 'review', 'output', 'other'];
+    items.push({
+      title: match[1],
+      description: match[2],
+      type: validTypes.includes(match[3]) ? match[3] as AIPlanItem['type'] : 'study',
+      estimatedMinutes: Math.max(10, Math.min(480, Number(match[4]) || 60)),
+      suggestedDate: match[5],
+      reviewEnabled: match[6] === 'true',
+    });
+  }
+
+  return items;
+}
+
 function parseAIResponse(content: string): AIGenerateResponse {
-  // 尝试提取 JSON（有时 AI 会在 JSON 外面包裹 markdown 代码块）
   let jsonStr = content.trim();
 
   // 去掉 markdown 代码块标记
@@ -170,29 +238,63 @@ function parseAIResponse(content: string): AIGenerateResponse {
     jsonStr = jsonMatch[1].trim();
   }
 
-  const parsed = JSON.parse(jsonStr);
+  // 尝试多次解析，逐步修复
+  const attempts = [
+    () => JSON.parse(jsonStr),                                    // 原始 JSON
+    () => JSON.parse(repairJSON(jsonStr)),                        // 修复 trailing comma + 括号补全
+    () => {
+      // 尝试提取 planTitle/planDescription，然后用正则提取 items
+      const titleMatch = jsonStr.match(/"planTitle"\s*:\s*"([^"]*)"/);
+      const descMatch = jsonStr.match(/"planDescription"\s*:\s*"([^"]*)"/);
+      const items = extractPlanItemsFromRawText(jsonStr);
+      if (items.length > 0) {
+        return {
+          planTitle: titleMatch?.[1] || '学习计划',
+          planDescription: descMatch?.[1] || '',
+          planItems: items,
+        };
+      }
+      throw new Error('无法提取计划内容');
+    },
+  ];
 
-  // 验证并规范化
-  if (!parsed.planItems || !Array.isArray(parsed.planItems)) {
-    throw new Error('AI 返回的数据格式不正确：缺少 planItems');
+  let lastError: Error | null = null;
+
+  for (const attempt of attempts) {
+    try {
+      const parsed = attempt();
+
+      // 验证
+      if (!parsed.planItems || !Array.isArray(parsed.planItems) || parsed.planItems.length === 0) {
+        throw new Error('AI 返回的数据格式不正确：缺少 planItems');
+      }
+
+      const validTypes = ['study', 'practice', 'review', 'output', 'other'];
+
+      const items: AIPlanItem[] = parsed.planItems.map((item: Record<string, unknown>) => ({
+        title: String(item.title || '未命名任务'),
+        description: String(item.description || ''),
+        type: validTypes.includes(String(item.type)) ? String(item.type) as AIPlanItem['type'] : 'study',
+        estimatedMinutes: Math.max(10, Math.min(480, Number(item.estimatedMinutes) || 60)),
+        suggestedDate: String(item.suggestedDate || ''),
+        reviewEnabled: item.reviewEnabled !== false,
+      }));
+
+      return {
+        planTitle: String(parsed.planTitle || '学习计划'),
+        planDescription: String(parsed.planDescription || ''),
+        planItems: items,
+      };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
   }
 
-  const validTypes = ['study', 'practice', 'review', 'output', 'other'];
-
-  const items: AIPlanItem[] = parsed.planItems.map((item: Record<string, unknown>) => ({
-    title: String(item.title || '未命名任务'),
-    description: String(item.description || ''),
-    type: validTypes.includes(String(item.type)) ? String(item.type) as AIPlanItem['type'] : 'study',
-    estimatedMinutes: Math.max(10, Math.min(480, Number(item.estimatedMinutes) || 60)),
-    suggestedDate: String(item.suggestedDate || ''),
-    reviewEnabled: item.reviewEnabled !== false,
-  }));
-
-  return {
-    planTitle: String(parsed.planTitle || '学习计划'),
-    planDescription: String(parsed.planDescription || ''),
-    planItems: items,
-  };
+  // 所有尝试都失败了
+  throw new Error(
+    `AI 返回的 JSON 格式无法解析：${lastError?.message || '未知错误'}\n\n` +
+    `原始返回内容前 500 字符：\n${content.slice(0, 500)}`
+  );
 }
 
 export async function buildKnowledgeContext(): Promise<string> {
