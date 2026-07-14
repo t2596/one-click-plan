@@ -1,4 +1,66 @@
 // 一键计划 Service Worker — PWA 离线缓存
+const CACHE_NAME = 'one-click-plan-v2';
+
+// 安装时预缓存关键静态资源
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll([
+        '/',
+        '/manifest.json',
+        '/icon-512.svg',
+      ]);
+    })
+  );
+  self.skipWaiting();
+});
+
+// 激活时清理旧缓存（包括 v1）
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => {
+      return Promise.all(
+        keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+      );
+    })
+  );
+  self.clients.claim();
+});
+
+// 请求拦截：只缓存静态资源，不插手页面导航（交给 Next.js 路由）
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  if (!url.protocol.startsWith('http')) return;
+
+  // 静态资源：缓存优先（JS/CSS/字体/图片，带 content hash 可永久缓存）
+  if (
+    request.destination === 'style' ||
+    request.destination === 'script' ||
+    request.destination === 'font' ||
+    request.destination === 'image' ||
+    url.pathname.startsWith('/_next/static')
+  ) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        const fetched = fetch(request).then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          }
+          return response;
+        });
+        return cached || fetched;
+      })
+    );
+    return;
+  }
+
+  // 其他所有请求（页面、API、Next.js 数据）：直通网络，不缓存
+  event.respondWith(fetch(request));
+});
+// 一键计划 Service Worker — PWA 离线缓存
 const CACHE_NAME = 'one-click-plan-v1';
 
 // 安装时预缓存关键资源
