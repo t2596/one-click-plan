@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { NotificationService } from "@/components/notification-service";
+import { PwaRegister } from "@/components/pwa-register";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -40,6 +41,7 @@ export default function RootLayout({
       <body className="min-h-full flex">
         <TooltipProvider>
           <NotificationService />
+          <PwaRegister />
           <Sidebar />
           <main className="ml-16 flex-1 overflow-auto transition-all duration-300">
             {children}
